@@ -181,7 +181,7 @@ export class ExploreService {
         }
       });
 
-      const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
     } catch (err: unknown) {
       this.logger.error(`Gemini API call failed: ${err instanceof Error ? err.message : err}`);
       if (axios.isAxiosError(err) && err.response) {
