@@ -10,7 +10,12 @@ import { ExploreModule } from './explore/explore.module';
     ThrottlerModule.forRoot({
       throttlers: [{ ttl: 86400000, limit: 5 }],
       storage: new ThrottlerStorageRedisService(
-        process.env.REDIS_URL || 'redis://localhost:6379'
+        process.env.REDIS_URL || 'redis://localhost:6379',
+        {
+          tls: process.env.REDIS_URL?.startsWith('rediss://')
+            ? { rejectUnauthorized: false }
+            : undefined,
+        }
       ),
     }),
     ExploreModule,
