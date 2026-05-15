@@ -1,5 +1,4 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { CurlParserService } from './curl-parser.service';
 import { ExploreDto } from './dto/explore.dto';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
@@ -91,78 +90,32 @@ GLOBAL RULES (both modes):
 - Never make up field paths — only use paths that exist in the provided JSON
 - If the JSON is truncated, note that in the summary`;
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 @Injectable()
 export class ExploreService {
   private readonly logger = createLogger(ExploreService.name);
 
   constructor(
-    private readonly curlParser: CurlParserService,
     private readonly configService: ConfigService,
   ) { }
 
   async explore(dto: ExploreDto): Promise<ExploreResult> {
-    this.logger.log(`Processing explore request. Mode: ${dto.curl ? 'curl' : 'json'}. Query: "${dto.query}"`);
-    if (!dto.curl && !dto.json) {
-      this.logger.error('No curl or json provided in request');
-      throw new BadRequestException(
-        'Provide either a curl command or raw JSON',
-      );
-    }
+    this.logger.log(`Processing explore request. Query: "${dto.query}"`);
 
-    const json = dto.curl
-      ? await this.fetchFromCurl(dto.curl)
-      : this.parseJson(dto.json!);
+    const json = this.parseJson(dto.json);
 
     return this.analyzeWithLLM(json, dto.query);
   }
 
-  private async fetchFromCurl(curlString: string): Promise<unknown> {
-    this.logger.log('Executing target API call from parsed curl...');
-    const parsed = this.curlParser.parse(curlString);
-
-    let response;
-    try {
-      response = await axios({
-        method: parsed.method,
-        url: parsed.url,
-        headers: parsed.headers,
-        data: parsed.body && parsed.method !== 'GET' ? parsed.body : undefined,
-      });
-    } catch (err: unknown) {
-      this.logger.error(`Error executing target API: ${err instanceof Error ? err.message : err}`);
-      if (axios.isAxiosError(err)) {
-        if (err.response) {
-          throw new BadRequestException(`API returned ${err.response.status} ${err.response.statusText || ''}`);
-        }
-        throw new BadRequestException(`Failed to reach ${parsed.url}: ${err.message}`);
-      }
-      const msg = err instanceof Error ? err.message : 'Network error';
-      throw new BadRequestException(`Failed to reach ${parsed.url}: ${msg}`);
-    }
-
-    const contentType = response.headers['content-type'] || '';
-    this.logger.log(`Target API responded with status ${response.status} and content-type: ${contentType}`);
-    if (
-      typeof contentType === 'string' &&
-      !contentType.includes('application/json') &&
-      !contentType.includes('json')
-    ) {
-      throw new BadRequestException(
-        `Response is not JSON (${contentType}). Only JSON APIs are supported.`,
-      );
-    }
-
-    return response.data;
-  }
-
   private parseJson(jsonString: string): unknown {
-    this.logger.log('Parsing user-provided raw JSON...');
     try {
       return JSON.parse(jsonString);
     } catch (err) {
       this.logger.error(`Failed to parse JSON: ${err instanceof Error ? err.message : err}`);
+      throw new BadRequestException(
+        'Invalid JSON — please check your input and try again.',
+      );
     }
   }
 
@@ -216,7 +169,7 @@ export class ExploreService {
     if (!apiKey) {
       throw new BadRequestException('Missing GEMINI_API_KEY');
     }
-
+    let text = "";
     try {
       const res = await axios.post(GEMINI_ENDPOINT, {
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
@@ -229,11 +182,6 @@ export class ExploreService {
       });
 
       const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        this.logger.error('Gemini response missing expected content format');
-        throw new BadRequestException('Gemini response missing expected content format');
-      }
-      return text;
     } catch (err: unknown) {
       this.logger.error(`Gemini API call failed: ${err instanceof Error ? err.message : err}`);
       if (axios.isAxiosError(err) && err.response) {
@@ -243,5 +191,12 @@ export class ExploreService {
       }
       throw new BadRequestException(`Gemini API error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
+    if (!text) {
+      this.logger.error('Gemini response missing expected content format');
+      throw new BadRequestException('Gemini response missing expected content format');
+    }
+    return text;
+
   }
+
 }
